@@ -41,35 +41,61 @@ public class TelemetryService {
 
     @Transactional
     public void handle(TelemetryPayload p) {
-        Meter meter = meters.findByDeviceIdWithRoomAndTenant(p.deviceId()).orElse(null);
-        if (meter == null) {
-            log.warn("Telemetry from unknown device '{}' - ignored", p.deviceId());
+        Meter meter = findAndValidateMeter(p.deviceId());
+        if (meter == null) return;
+
+        updateMeterTelemetry(meter, p);
+
+        double delta = calculateValidDelta(p, meter);
+        meter.setLastEnergyKwh(p.energyKwh());
+
+        if (!isMeterReadyForBilling(meter)) {
+            saveReading(meter, p, delta, BigDecimal.ZERO);
             return;
         }
+
+        processBillingAndControlRelay(meter, p, delta);
+    }
+
+    // ---------- Clean Code: Extracted Single-Responsibility Helpers ----------
+
+    private Meter findAndValidateMeter(String deviceId) {
+        Meter meter = meters.findByDeviceIdWithRoomAndTenant(deviceId).orElse(null);
+        if (meter == null) {
+            log.warn("Telemetry from unknown device '{}' - ignored", deviceId);
+        }
+        return meter;
+    }
+
+    private void updateMeterTelemetry(Meter meter, TelemetryPayload p) {
         meter.setLastSeen(Instant.now());
         meter.setLastVoltage(p.voltage());
         meter.setLastCurrent(p.current());
         meter.setLastPowerW(p.powerW());
         meter.setLastFrequency(p.frequency());
         meter.setLastPowerFactor(p.powerFactor());
+    }
 
-        // Guard against a bad/reset counter: never bill a negative delta.
+    private double calculateValidDelta(TelemetryPayload p, Meter meter) {
         double delta = p.energyKwh() - meter.getLastEnergyKwh();
-        if (delta < 0) delta = 0;
-        meter.setLastEnergyKwh(p.energyKwh());
+        return delta < 0 ? 0.0 : delta; // Guard against hardware counter reset
+    }
 
+    private boolean isMeterReadyForBilling(Meter meter) {
         Room room = meter.getRoom();
-        // A meter only bills once a tenant is onboarded into its room and activated.
-        if (room == null || room.getTenant() == null || meter.getActivatedAt() == null) {
-            saveReading(meter, p, delta, BigDecimal.ZERO);
-            return;
-        }
+        return room != null && room.getTenant() != null && meter.getActivatedAt() != null;
+    }
 
+    private void processBillingAndControlRelay(Meter meter, TelemetryPayload p, double delta) {
+        Room room = meter.getRoom();
         AppUser tenant = room.getTenant();
+
         BigDecimal tariff = landlordSettings.findByLandlordId(room.getLandlord().getId())
                 .map(LandlordSettings::getTariffPerKwh).orElse(DEFAULT_TARIFF);
+
         BigDecimal cost = tariff.multiply(BigDecimal.valueOf(delta)).setScale(2, RoundingMode.HALF_UP);
         saveReading(meter, p, delta, cost);
+
         if (cost.signum() <= 0) return;
 
         Instant resolvedInstant = resolveValidInstant(p.ts());
@@ -77,14 +103,19 @@ public class TelemetryService {
 
         Wallet wallet = walletService.apply(tenant.getId(), TxnType.USAGE, cost.negate(), "Usage " + trimKwh(delta) + " kWh");
 
+        evaluateRelayAndAlerts(meter, tenant, wallet);
+    }
+
+    private void evaluateRelayAndAlerts(Meter meter, AppUser tenant, Wallet wallet) {
         boolean shouldBeOn = wallet.getBalance().compareTo(wallet.getMinBalance()) > 0;
+        BigDecimal warningThreshold = wallet.getMinBalance().multiply(new BigDecimal("1.2"));
+
         if (!shouldBeOn && meter.isRelayOn()) {
             meterCommands.sendRelay(meter, false);
             smsService.sendLowBalanceCut(tenant, wallet.getBalance());
         } else if (shouldBeOn && !meter.isRelayOn() && !meter.isManualLock()) {
             meterCommands.sendRelay(meter, true);
-        } else if (shouldBeOn
-                && wallet.getBalance().compareTo(wallet.getMinBalance().multiply(new BigDecimal("1.2"))) <= 0) {
+        } else if (shouldBeOn && wallet.getBalance().compareTo(warningThreshold) <= 0) {
             smsService.sendLowBalanceWarning(tenant, wallet.getBalance());
         }
     }
