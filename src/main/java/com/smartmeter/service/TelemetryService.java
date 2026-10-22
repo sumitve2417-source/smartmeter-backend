@@ -20,6 +20,7 @@ import java.time.ZoneId;
 
 /**
  * One telemetry sample in, one billing decision out. This is the core loop:
+ *
  * delta kWh since last sample -> deduct wallet -> cut relay if below minimum -> restore/alert as needed.
  */
 @Slf4j
@@ -48,6 +49,12 @@ public class TelemetryService {
 
         double delta = calculateValidDelta(p, meter);
         meter.setLastEnergyKwh(p.energyKwh());
+
+        // GUARD CHECK: If the relay is already OFF, completely ignore billing and deductions
+        if (!meter.isRelayOn()) {
+            saveReading(meter, p, delta, BigDecimal.ZERO);
+            return;
+        }
 
         if (!isMeterReadyForBilling(meter)) {
             saveReading(meter, p, delta, BigDecimal.ZERO);
