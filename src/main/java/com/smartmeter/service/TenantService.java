@@ -22,6 +22,8 @@ public class TenantService {
     private final WalletTxnRepository txns;
     private final LandlordSettingsRepository settingsRepo;
     private final RechargeRequestRepository recharges;
+    private final WalletService walletService;
+    private final MeterCommandService meterCommands;
 
     @Transactional(readOnly = true)
     public TenantDashboard dashboard(String username) {
@@ -52,12 +54,27 @@ public class TenantService {
         String utr = r.utr().toUpperCase();
         if (recharges.existsByUtr(utr)) throw ApiException.conflict("This transaction id was already submitted");
 
+        // 1. Save directly as APPROVED for instant automation log
         RechargeRequest req = new RechargeRequest();
         req.setTenant(t);
         req.setLandlord(t.getLandlord());
         req.setAmount(r.amount());
         req.setUtr(utr);
+        req.setStatus(RechargeStatus.APPROVED);
+        req.setDecidedAt(java.time.Instant.now());
         recharges.save(req);
+
+        // 2. Instantly credit the tenant's wallet
+        Wallet updatedWallet = walletService.apply(t.getId(), TxnType.RECHARGE, r.amount(), "Instant UPI " + utr);
+
+        // 3. Automatically turn the relay ON if power was cut due to low balance
+        rooms.findByTenantId(t.getId()).ifPresent(room -> {
+            Meter m = room.getMeter();
+            if (!m.isRelayOn() && !m.isManualLock() && updatedWallet.getBalance().compareTo(updatedWallet.getMinBalance()) > 0) {
+                meterCommands.sendRelay(m, true);
+            }
+        });
+
         return toDto(req, t);
     }
 
