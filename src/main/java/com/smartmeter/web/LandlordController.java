@@ -71,11 +71,6 @@ public class LandlordController {
         return svc.listRecharges(a.getName(), status);
     }
 
-    @PostMapping("/recharges/{id}/approve")
-    public RechargeResponse approve(Authentication a, @PathVariable Long id) { return svc.approveRecharge(a.getName(), id); }
-
-    @PostMapping("/recharges/{id}/reject")
-    public RechargeResponse reject(Authentication a, @PathVariable Long id) { return svc.rejectRecharge(a.getName(), id); }
 
     @GetMapping("/support")
     public SupportInfo support() { return support.forLandlord(); }
