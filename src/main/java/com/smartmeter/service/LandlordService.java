@@ -159,44 +159,12 @@ public class LandlordService {
                 .toList();
     }
 
-    // ---------- recharge approvals ----------
+    // ---------- recharge history log ----------
     @Transactional(readOnly = true)
     public List<RechargeResponse> listRecharges(String username, RechargeStatus status) {
         AppUser landlord = lookup.byUsername(username);
         return recharges.findByLandlordIdAndStatusOrderByCreatedAtDesc(landlord.getId(), status)
                 .stream().map(this::toDto).toList();
-    }
-
-    @Transactional
-    public RechargeResponse approveRecharge(String username, Long id) {
-        AppUser landlord = lookup.byUsername(username);
-        RechargeRequest r = recharges.findByIdAndLandlordId(id, landlord.getId())
-                .orElseThrow(() -> ApiException.notFound("Recharge request not found"));
-        if (r.getStatus() != RechargeStatus.PENDING) throw ApiException.conflict("Already " + r.getStatus());
-
-        Wallet w = walletService.apply(r.getTenant().getId(), TxnType.RECHARGE, r.getAmount(), "UPI " + r.getUtr());
-        r.setStatus(RechargeStatus.APPROVED);
-        r.setDecidedAt(Instant.now());
-
-        // Restore power automatically if it was cut for low balance (never if the landlord cut it by hand).
-        rooms.findByTenantId(r.getTenant().getId()).ifPresent(room -> {
-            Meter m = room.getMeter();
-            if (!m.isRelayOn() && !m.isManualLock() && w.getBalance().compareTo(w.getMinBalance()) > 0) {
-                meterCommands.sendRelay(m, true);
-            }
-        });
-        return toDto(r);
-    }
-
-    @Transactional
-    public RechargeResponse rejectRecharge(String username, Long id) {
-        AppUser landlord = lookup.byUsername(username);
-        RechargeRequest r = recharges.findByIdAndLandlordId(id, landlord.getId())
-                .orElseThrow(() -> ApiException.notFound("Recharge request not found"));
-        if (r.getStatus() != RechargeStatus.PENDING) throw ApiException.conflict("Already " + r.getStatus());
-        r.setStatus(RechargeStatus.REJECTED);
-        r.setDecidedAt(Instant.now());
-        return toDto(r);
     }
 
     // ---------- helpers ----------
@@ -238,3 +206,4 @@ public class LandlordService {
                 r.getUtr(), r.getStatus().name(), r.getCreatedAt());
     }
 }
+
