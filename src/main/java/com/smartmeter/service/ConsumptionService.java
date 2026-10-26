@@ -48,9 +48,10 @@ public class ConsumptionService {
     private ChartResponse forMeter(Long meterId, String range, String dateParam) {
         return switch (range.toLowerCase()) {
             case "day" -> dayChart(meterId, parseDate(dateParam));
+            case "month" -> monthChart(meterId, null, parseYearMonth(dateParam)); // Fixed parameter order
             case "year" -> yearChart(meterId, null, parseYear(dateParam));
             case "total" -> totalChart(meterId, null);
-            default -> monthChart(null, meterId, parseYearMonth(dateParam));
+            default -> monthChart(meterId, null, parseYearMonth(dateParam)); // Fixed parameter order
         };
     }
 
