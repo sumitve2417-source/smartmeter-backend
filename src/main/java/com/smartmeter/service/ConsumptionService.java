@@ -49,7 +49,8 @@ public class ConsumptionService {
         return switch (range.toLowerCase()) {
             case "day" -> dayChart(meterId, parseDate(dateParam));
             case "year" -> yearChart(meterId, null, parseYear(dateParam));
-            default -> monthChart(meterId, null, parseYearMonth(dateParam));
+            case "total" -> totalChart(meterId, null);
+            default -> monthChart(null, meterId, parseYearMonth(dateParam));
         };
     }
 
@@ -128,10 +129,41 @@ public class ConsumptionService {
         return new ChartResponse("year", year.toString(), points, round(totalKwh), totalRevenue);
     }
 
+    private ChartResponse totalChart(Long meterId, Long landlordId) {
+        List<DailyConsumption> rows = landlordId == null
+                ? dailyConsumption.findByMeterIdAndDayBetweenOrderByDay(meterId, LocalDate.of(2022, 1, 1), LocalDate.now(INDIA_ZONE))
+                : dailyConsumption.findForLandlordBetween(landlordId, LocalDate.of(2022, 1, 1), LocalDate.now(INDIA_ZONE));
+
+        Map<String, Double> kwhByYear = new TreeMap<>();
+        Map<String, BigDecimal> revByYear = new TreeMap<>();
+
+        for (DailyConsumption dc : rows) {
+            String yearStr = String.valueOf(dc.getDay().getYear());
+            kwhByYear.put(yearStr, kwhByYear.getOrDefault(yearStr, 0.0) + dc.getKwh());
+            revByYear.put(yearStr, revByYear.getOrDefault(yearStr, BigDecimal.ZERO).add(dc.getRevenue()));
+        }
+
+        List<ChartPoint> points = new ArrayList<>();
+        double totalKwh = 0;
+        BigDecimal totalRevenue = BigDecimal.ZERO;
+
+        for (var entry : kwhByYear.entrySet()) {
+            String yr = entry.getKey();
+            double kwh = entry.getValue();
+            BigDecimal rev = revByYear.get(yr);
+            points.add(new ChartPoint(yr, round(kwh), rev, null));
+            totalKwh += kwh;
+            totalRevenue = totalRevenue.add(rev);
+        }
+
+        return new ChartResponse("total", "All-time", points, round(totalKwh), totalRevenue);
+    }
+
     private ChartResponse forLandlord(Long landlordId, String range, String dateParam) {
         return switch (range.toLowerCase()) {
             case "day" -> landlordDayChart(landlordId, parseDate(dateParam));
             case "year" -> yearChart(null, landlordId, parseYear(dateParam));
+            case "total" -> totalChart(null, landlordId);
             default -> monthChart(null, landlordId, parseYearMonth(dateParam));
         };
     }
