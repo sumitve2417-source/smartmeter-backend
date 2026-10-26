@@ -48,26 +48,30 @@ public class ConsumptionService {
     private ChartResponse forMeter(Long meterId, String range, String dateParam) {
         return switch (range.toLowerCase()) {
             case "day" -> dayChart(meterId, parseDate(dateParam));
-            case "month" -> monthChart(meterId, null, parseYearMonth(dateParam)); // Fixed parameter order
+            case "month" -> monthChart(meterId, null, parseYearMonth(dateParam));
             case "year" -> yearChart(meterId, null, parseYear(dateParam));
             case "total" -> totalChart(meterId, null);
-            default -> monthChart(meterId, null, parseYearMonth(dateParam)); // Fixed parameter order
+            default -> monthChart(meterId, null, parseYearMonth(dateParam));
         };
     }
 
     private ChartResponse dayChart(Long meterId, LocalDate date) {
-        Instant from = date.atStartOfDay(INDIA_ZONE).toInstant();
-        Instant to = date.plusDays(1).atStartOfDay(INDIA_ZONE).toInstant();
+        LocalDateTime from = date.atStartOfDay();
+        LocalDateTime to = date.plusDays(1).atStartOfDay();
         List<Reading> rows = readings.findBetween(meterId, from, to);
 
         double[] kwhByHour = new double[24];
         double[] powerSumByHour = new double[24];
         int[] countByHour = new int[24];
         for (Reading r : rows) {
-            int h = r.getRecordedAt().getHour(); // Direct local hour matching India time
-            kwhByHour[h] += r.getDeltaKwh();
-            powerSumByHour[h] += r.getPowerW();
-            countByHour[h]++;
+            try {
+                int h = r.getRecordedAt().getHour();
+                kwhByHour[h] += r.getDeltaKwh();
+                powerSumByHour[h] += r.getPowerW();
+                countByHour[h]++;
+            } catch (Exception e) {
+                // Skip invalid rows safely
+            }
         }
         List<ChartPoint> points = new ArrayList<>();
         double totalKwh = 0;
@@ -76,7 +80,10 @@ public class ConsumptionService {
             points.add(new ChartPoint(String.format("%02d:00", h), round(kwhByHour[h]), BigDecimal.ZERO, round(avgPower)));
             totalKwh += kwhByHour[h];
         }
-        BigDecimal totalRevenue = rows.stream().map(Reading::getCost).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalRevenue = rows.stream()
+                .map(Reading::getCost)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         return new ChartResponse("day", date.toString(), points, round(totalKwh), totalRevenue);
     }
 
@@ -171,8 +178,8 @@ public class ConsumptionService {
 
     private ChartResponse landlordDayChart(Long landlordId, LocalDate date) {
         List<Room> allRooms = rooms.findByLandlordIdOrderByName(landlordId);
-        Instant from = date.atStartOfDay(INDIA_ZONE).toInstant();
-        Instant to = date.plusDays(1).atStartOfDay(INDIA_ZONE).toInstant();
+        LocalDateTime from = date.atStartOfDay();
+        LocalDateTime to = date.plusDays(1).atStartOfDay();
         double[] kwhByHour = new double[24];
         BigDecimal[] revByHour = new BigDecimal[24];
         Arrays.fill(revByHour, BigDecimal.ZERO);
