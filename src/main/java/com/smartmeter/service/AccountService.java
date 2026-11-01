@@ -29,11 +29,11 @@ public class AccountService {
     @Transactional
     public ProfileUpdateResponse updateProfile(String username, ProfileUpdateRequest r) {
         AppUser u = lookup.byUsername(username);
-        if (!encoder.matches(r.currentPassword(), u.getPasswordHash())) {
-            throw new ApiException(HttpStatus.UNAUTHORIZED, "Current password is incorrect");
-        }
-        String newEmail = r.email().trim().toLowerCase();
 
+        // Clean Guard Clause using private helper (DRY principle)
+        verifyPassword(u, r.currentPassword());
+
+        String newEmail = r.email().trim().toLowerCase();
         if (!newEmail.equals(u.getUsername()) && users.existsByUsernameAndIdNot(newEmail, u.getId())) {
             throw ApiException.conflict("That email is already registered to another account");
         }
@@ -49,10 +49,18 @@ public class AccountService {
     @Transactional
     public void changePassword(String username, ChangePasswordRequest r) {
         AppUser u = lookup.byUsername(username);
-        if (!encoder.matches(r.currentPassword(), u.getPasswordHash())) {
-            throw new ApiException(HttpStatus.UNAUTHORIZED, "Current password is incorrect");
-        }
+
+        // Clean Guard Clause using private helper (DRY principle)
+        verifyPassword(u, r.currentPassword());
+
         u.setPasswordHash(encoder.encode(r.newPassword()));
         users.save(u);
+    }
+
+    /** Clean Code: Extracted helper method to avoid duplicating password verification logic (DRY principle) */
+    private void verifyPassword(AppUser user, String rawPassword) {
+        if (!encoder.matches(rawPassword, user.getPasswordHash())) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Current password is incorrect");
+        }
     }
 }
