@@ -35,7 +35,7 @@ app:
     secret: ${JWT_SECRET:change-this-dev-secret-change-this-dev-secret-0123}
     expiry-minutes: 60
   cors:
-    origins: ${CORS_ORIGINS:http://localhost:5173}
+    origins: ${CORS_ORIGINS:http://localhost:5173,http://192.168.29.84:5173}
   bootstrap:
     landlord-username: ${BOOT_LANDLORD_USER:landlord@example.com}
     landlord-password: ${BOOT_LANDLORD_PASS:}

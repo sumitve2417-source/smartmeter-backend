@@ -26,4 +26,13 @@ public class Room {
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tenant_id", unique = true)
     private AppUser tenant;
+    public void vacate() {
+        if (this.tenant != null) {
+            this.tenant.setActive(false);
+        }
+        this.tenant = null;
+        if (this.meter != null) {
+            this.meter.markAsVacated();
+        }
+    }
 }

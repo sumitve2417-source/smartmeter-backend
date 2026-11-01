@@ -42,4 +42,9 @@ public class Meter {
 
     /** Set when a tenant is onboarded into this meter's room; null again after vacate. No billing happens while null. */
     private Instant activatedAt;
+    // Inside com.smartmeter.domain.Meter.java
+    public void markAsVacated() {
+        this.manualLock = true;
+        this.activatedAt = null;
+    }
 }

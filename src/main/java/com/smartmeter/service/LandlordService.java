@@ -136,19 +136,6 @@ public class LandlordService {
         return new TenantResponse(t.getId(), t.getFullName(), t.getUsername(), t.getPhone(), t.isActive(), room.getName());
     }
 
-    @Transactional
-    public void vacateRoom(String username, Long roomId) {
-        AppUser landlord = lookup.byUsername(username);
-        Room room = rooms.findByIdAndLandlordId(roomId, landlord.getId())
-                .orElseThrow(() -> ApiException.notFound("Room not found"));
-        AppUser t = room.getTenant();
-        if (t == null) throw ApiException.conflict("Room has no tenant");
-        t.setActive(false);            // login blocked immediately; wallet and history are kept for records
-        room.setTenant(null);
-        room.getMeter().setManualLock(true);
-        room.getMeter().setActivatedAt(null);
-        meterCommands.sendRelay(room.getMeter(), false);
-    }
 
     @Transactional(readOnly = true)
     public List<TenantResponse> listTenants(String username) {
@@ -205,5 +192,20 @@ public class LandlordService {
         return new RechargeResponse(r.getId(), r.getTenant().getFullName(), roomName, r.getAmount(),
                 r.getUtr(), r.getStatus().name(), r.getCreatedAt());
     }
+
+    // Inside com.smartmeter.service.LandlordService.java
+    @Transactional
+    public void vacateRoom(String username, Long roomId) {
+        AppUser landlord = lookup.byUsername(username);
+        Room room = rooms.findByIdAndLandlordId(roomId, landlord.getId())
+                .orElseThrow(() -> ApiException.notFound("Room not found"));
+        if (room.getTenant() == null) throw ApiException.conflict("Room has no tenant");
+
+        // Tell the room object to handle its own state changes (Tell, Don't Ask)
+        room.vacate();
+
+        meterCommands.sendRelay(room.getMeter(), false);
+    }
+
 }
 
