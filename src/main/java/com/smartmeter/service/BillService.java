@@ -66,13 +66,11 @@ public class BillService {
                 .map(WalletTxn::getBalanceAfter).orElse(BigDecimal.ZERO);
 
         List<WalletTxn> inMonth = walletTxns.findByWalletIdAndCreatedAtBetweenOrderByCreatedAtAsc(wallet.getId(), monthStart, monthEnd);
-        BigDecimal recharged = inMonth.stream().filter(t -> t.getType() == TxnType.RECHARGE)
-                .map(WalletTxn::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal usageAmount = inMonth.stream().filter(t -> t.getType() == TxnType.USAGE)
-                .map(WalletTxn::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add).abs();
 
-        double kwh = dailyConsumption.findByMeterIdAndDayBetweenOrderByDay(room.getMeter().getId(), ym.atDay(1), ym.atEndOfMonth())
-                .stream().mapToDouble(DailyConsumption::getKwh).sum();
+
+        BigDecimal recharged = calculateRecharged(inMonth);
+        BigDecimal usageAmount = calculateUsage(inMonth);
+        double kwh = calculateConsumptionKwh(room.getMeter().getId(), ym);
 
         BigDecimal newBalance = inMonth.isEmpty() ? oldBalance : inMonth.get(inMonth.size() - 1).getBalanceAfter();
         BigDecimal tariff = landlordSettings.findByLandlordId(room.getLandlord().getId())
@@ -80,6 +78,31 @@ public class BillService {
 
         return new BillSummary(ym.format(PERIOD_FMT), tenant.getFullName(), room.getName(), room.getLandlord().getFullName(),
                 oldBalance, recharged, round(kwh), usageAmount, tariff, newBalance);
+    }
+
+
+    private BigDecimal calculateRecharged(List<WalletTxn> txns) {
+        return txns.stream()
+                .filter(t -> t.getType() == TxnType.RECHARGE)
+                .map(WalletTxn::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+
+    private BigDecimal calculateUsage(List<WalletTxn> txns) {
+        return txns.stream()
+                .filter(t -> t.getType() == TxnType.USAGE)
+                .map(WalletTxn::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .abs();
+    }
+
+
+    private double calculateConsumptionKwh(Long meterId, YearMonth ym) {
+        return dailyConsumption.findByMeterIdAndDayBetweenOrderByDay(meterId, ym.atDay(1), ym.atEndOfMonth())
+                .stream()
+                .mapToDouble(DailyConsumption::getKwh)
+                .sum();
     }
 
     public byte[] renderPdf(BillSummary b) {
