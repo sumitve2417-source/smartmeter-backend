@@ -52,6 +52,7 @@ public class BillService {
     }
 
     /** Last 12 months, newest first - the landlord/tenant can request a bill for any of these periods. */
+    @Transactional(readOnly = true)
     public List<String> availablePeriods() {
         YearMonth now = YearMonth.now(ZoneOffset.UTC);
         return java.util.stream.IntStream.range(0, 12).mapToObj(now::minusMonths).map(YearMonth::toString).toList();
