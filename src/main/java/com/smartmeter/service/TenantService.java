@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 
 @Service
@@ -27,70 +28,116 @@ public class TenantService {
 
     @Transactional(readOnly = true)
     public TenantDashboard dashboard(String username) {
-        AppUser t = lookup.byUsername(username);
-        Wallet w = wallets.findByTenantId(t.getId()).orElseThrow(() -> ApiException.notFound("Wallet not found"));
-        Room room = rooms.findByTenantId(t.getId()).orElse(null);
-        BigDecimal tariff = settingsRepo.findByLandlordId(t.getLandlord().getId())
-                .map(LandlordSettings::getTariffPerKwh).orElse(BigDecimal.ZERO);
-        boolean low = w.getBalance().compareTo(w.getMinBalance().multiply(new BigDecimal("1.2"))) <= 0;
-        Meter m = room == null ? null : room.getMeter();
-        return new TenantDashboard(t.getFullName(), room == null ? null : room.getName(), w.getBalance(),
-                w.getMinBalance(), tariff, m == null || m.isRelayOn(), low,
-                m == null ? null : m.getLastPowerW(), m == null ? null : m.getLastVoltage(), m == null ? null : m.getLastSeen());
+        AppUser tenant = lookup.byUsername(username);
+        Wallet wallet = findWallet(tenant.getId());
+        Room room = rooms.findByTenantId(tenant.getId()).orElse(null);
+        BigDecimal tariff = fetchTariff(tenant.getLandlord().getId());
+        boolean isLowBalance = wallet.getBalance().compareTo(wallet.getMinBalance().multiply(new BigDecimal("1.2"))) <= 0;
+        Meter meter = room == null ? null : room.getMeter();
+
+        return new TenantDashboard(
+                tenant.getFullName(),
+                room == null ? null : room.getName(),
+                wallet.getBalance(),
+                wallet.getMinBalance(),
+                tariff,
+                meter == null || meter.isRelayOn(),
+                isLowBalance,
+                meter == null ? null : meter.getLastPowerW(),
+                meter == null ? null : meter.getLastVoltage(),
+                meter == null ? null : meter.getLastSeen()
+        );
     }
 
     @Transactional(readOnly = true)
     public PaymentInfo paymentInfo(String username) {
-        AppUser t = lookup.byUsername(username);
-        LandlordSettings s = settingsRepo.findByLandlordId(t.getLandlord().getId()).orElse(null);
-        if (s == null || s.getUpiId() == null) throw ApiException.conflict("Your landlord has not set up payments yet");
-        String link = "upi://pay?pa=" + enc(s.getUpiId()) + "&pn=" + enc(s.getPayeeName()) + "&cu=INR";
-        return new PaymentInfo(s.getUpiId(), s.getPayeeName(), LandlordService.qrDataUrl(s), link);
+        AppUser tenant = lookup.byUsername(username);
+        LandlordSettings settings = settingsRepo.findByLandlordId(tenant.getLandlord().getId()).orElse(null);
+        if (settings == null || settings.getUpiId() == null) {
+            throw ApiException.conflict("Your landlord has not set up payments yet");
+        }
+        String upiLink = "upi://pay?pa=" + enc(settings.getUpiId()) + "&pn=" + enc(settings.getPayeeName()) + "&cu=INR";
+        return new PaymentInfo(settings.getUpiId(), settings.getPayeeName(), LandlordService.qrDataUrl(settings), upiLink);
     }
 
     @Transactional
     public RechargeResponse submitRecharge(String username, RechargeSubmit r) {
-        AppUser t = lookup.byUsername(username);
-        String utr = r.utr().toUpperCase();
-        if (recharges.existsByUtr(utr)) throw ApiException.conflict("This transaction id was already submitted");
+        AppUser tenant = lookup.byUsername(username);
+        String utr = validateAndNormalizeUtr(r.utr());
 
-        // 1. Save directly as APPROVED for instant automation log
-        RechargeRequest req = new RechargeRequest();
-        req.setTenant(t);
-        req.setLandlord(t.getLandlord());
-        req.setAmount(r.amount());
-        req.setUtr(utr);
-        req.setStatus(RechargeStatus.APPROVED);
-        req.setDecidedAt(java.time.Instant.now());
-        recharges.save(req);
+        RechargeRequest rechargeRequest = saveApprovedRecharge(tenant, r.amount(), utr);
+        Wallet updatedWallet = creditTenantWallet(tenant.getId(), r.amount(), utr);
+        restorePowerIfEligible(tenant.getId(), updatedWallet);
 
-        // 2. Instantly credit the tenant's wallet
-        Wallet updatedWallet = walletService.apply(t.getId(), TxnType.RECHARGE, r.amount(), "Instant UPI " + utr);
-
-        // 3. Automatically turn the relay ON if power was cut due to low balance
-        rooms.findByTenantId(t.getId()).ifPresent(room -> {
-            Meter m = room.getMeter();
-            if (!m.isRelayOn() && !m.isManualLock() && updatedWallet.getBalance().compareTo(updatedWallet.getMinBalance()) > 0) {
-                meterCommands.sendRelay(m, true);
-            }
-        });
-
-        return toDto(req, t);
+        return toDto(rechargeRequest, tenant);
     }
 
     @Transactional(readOnly = true)
     public List<RechargeResponse> myRecharges(String username) {
-        AppUser t = lookup.byUsername(username);
-        return recharges.findTop20ByTenantIdOrderByCreatedAtDesc(t.getId()).stream().map(r -> toDto(r, t)).toList();
+        AppUser tenant = lookup.byUsername(username);
+        return recharges.findTop20ByTenantIdOrderByCreatedAtDesc(tenant.getId())
+                .stream()
+                .map(r -> toDto(r, tenant))
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public List<TxnResponse> transactions(String username) {
-        AppUser t = lookup.byUsername(username);
-        Wallet w = wallets.findByTenantId(t.getId()).orElseThrow(() -> ApiException.notFound("Wallet not found"));
-        return txns.findTop50ByWalletIdOrderByCreatedAtDesc(w.getId()).stream()
+        AppUser tenant = lookup.byUsername(username);
+        Wallet wallet = findWallet(tenant.getId());
+        return txns.findTop50ByWalletIdOrderByCreatedAtDesc(wallet.getId())
+                .stream()
                 .map(x -> new TxnResponse(x.getType().name(), x.getAmount(), x.getBalanceAfter(), x.getReference(), x.getCreatedAt()))
                 .toList();
+    }
+
+    // ---------- Single-Responsibility Clean Code Helpers ----------
+
+    private Wallet findWallet(Long tenantId) {
+        return wallets.findByTenantId(tenantId)
+                .orElseThrow(() -> ApiException.notFound("Wallet not found"));
+    }
+
+    private BigDecimal fetchTariff(Long landlordId) {
+        return settingsRepo.findByLandlordId(landlordId)
+                .map(LandlordSettings::getTariffPerKwh)
+                .orElse(BigDecimal.ZERO);
+    }
+
+    private String validateAndNormalizeUtr(String rawUtr) {
+        String utr = rawUtr.toUpperCase();
+        if (recharges.existsByUtr(utr)) {
+            throw ApiException.conflict("This transaction id was already submitted");
+        }
+        return utr;
+    }
+
+    private RechargeRequest saveApprovedRecharge(AppUser tenant, BigDecimal amount, String utr) {
+        RechargeRequest req = new RechargeRequest();
+        req.setTenant(tenant);
+        req.setLandlord(tenant.getLandlord());
+        req.setAmount(amount);
+        req.setUtr(utr);
+        req.setStatus(RechargeStatus.APPROVED);
+        req.setDecidedAt(Instant.now());
+        return recharges.save(req);
+    }
+
+    private Wallet creditTenantWallet(Long tenantId, BigDecimal amount, String utr) {
+        return walletService.apply(tenantId, TxnType.RECHARGE, amount, "Instant UPI " + utr);
+    }
+
+    private void restorePowerIfEligible(Long tenantId, Wallet updatedWallet) {
+        rooms.findByTenantId(tenantId).ifPresent(room -> {
+            Meter meter = room.getMeter();
+            boolean isPowerCut = !meter.isRelayOn();
+            boolean notManuallyLocked = !meter.isManualLock();
+            boolean balanceAboveMinimum = updatedWallet.getBalance().compareTo(updatedWallet.getMinBalance()) > 0;
+
+            if (isPowerCut && notManuallyLocked && balanceAboveMinimum) {
+                meterCommands.sendRelay(meter, true);
+            }
+        });
     }
 
     private RechargeResponse toDto(RechargeRequest r, AppUser t) {
