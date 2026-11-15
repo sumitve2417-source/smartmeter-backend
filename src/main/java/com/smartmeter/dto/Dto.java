@@ -45,6 +45,19 @@ public final class Dto {
             @NotNull @DecimalMin("1") @Digits(integer = 8, fraction = 2) BigDecimal amount,
             @NotBlank @Pattern(regexp = "^[A-Za-z0-9]{8,30}$", message = "invalid UTR / transaction id") String utr) {}
 
+    // ---- Payment Gateway Order DTOs ----
+    public record PaymentOrderRequest(
+            @NotNull @DecimalMin("1.00") @Digits(integer = 8, fraction = 2) BigDecimal amount
+    ) {}
+
+    public record PaymentOrderResponse(
+            String orderId,
+            BigDecimal amount,
+            String keyId,
+            String roomName
+    ) {}
+    // ------------------------------------
+
     public record RechargeResponse(Long id, String tenantName, String room, BigDecimal amount,
                                    String utr, String status, Instant createdAt) {}
 
