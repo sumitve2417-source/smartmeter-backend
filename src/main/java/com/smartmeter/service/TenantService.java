@@ -53,22 +53,27 @@ public class TenantService {
     public PaymentInfo paymentInfo(String username) {
         AppUser tenant = lookup.byUsername(username);
         LandlordSettings settings = settingsRepo.findByLandlordId(tenant.getLandlord().getId()).orElse(null);
-        if (settings == null || settings.getUpiId() == null) {
-            throw ApiException.conflict("Your landlord has not set up payments yet");
+        if (settings == null || settings.getRazorpayKeyId() == null) {
+            throw ApiException.conflict("Your landlord has not configured Razorpay gateway keys yet");
         }
-        String upiLink = "upi://pay?pa=" + enc(settings.getUpiId()) + "&pn=" + enc(settings.getPayeeName()) + "&cu=INR";
-        return new PaymentInfo(settings.getUpiId(), settings.getPayeeName(), LandlordService.qrDataUrl(settings), upiLink);
+        return new PaymentInfo(settings.getRazorpayKeyId());
     }
 
     @Transactional
-    public com.smartmeter.dto.Dto.PaymentOrderResponse createPaymentOrder(String username, BigDecimal amount) {
+    public PaymentOrderResponse createPaymentOrder(String username, BigDecimal amount) {
         AppUser tenant = lookup.byUsername(username);
         Room room = rooms.findByTenantId(tenant.getId())
                 .orElseThrow(() -> ApiException.notFound("No room assigned"));
 
+        LandlordSettings settings = settingsRepo.findByLandlordId(tenant.getLandlord().getId())
+                .orElseThrow(() -> ApiException.conflict("Landlord settings not found"));
+
+        if (settings.getRazorpayKeyId() == null || settings.getRazorpayKeySecret() == null) {
+            throw ApiException.conflict("Landlord has not configured Razorpay keys yet");
+        }
+
         try {
-            // Using Razorpay client (make sure your Key ID and Secret are configured in application.yml or environment variables)
-            com.razorpay.RazorpayClient razorpay = new com.razorpay.RazorpayClient("YOUR_KEY_ID", "YOUR_KEY_SECRET");
+            com.razorpay.RazorpayClient razorpay = new com.razorpay.RazorpayClient(settings.getRazorpayKeyId(), settings.getRazorpayKeySecret());
 
             org.json.JSONObject orderRequest = new org.json.JSONObject();
             orderRequest.put("amount", amount.multiply(new BigDecimal(100)).intValue()); // Amount in paise
@@ -87,9 +92,9 @@ public class TenantService {
             req.setStatus(RechargeStatus.PENDING);
             recharges.save(req);
 
-            return new com.smartmeter.dto.Dto.PaymentOrderResponse(orderId, amount, "YOUR_KEY_ID", room.getName());
+            return new PaymentOrderResponse(orderId, amount, settings.getRazorpayKeyId(), room.getName());
         } catch (Exception e) {
-            throw ApiException.bad("Could not initialize payment gateway order");
+            throw ApiException.bad("Could not initialize payment gateway order: " + e.getMessage());
         }
     }
 
@@ -123,42 +128,6 @@ public class TenantService {
         return settingsRepo.findByLandlordId(landlordId)
                 .map(LandlordSettings::getTariffPerKwh)
                 .orElse(BigDecimal.ZERO);
-    }
-
-    private String validateAndNormalizeUtr(String rawUtr) {
-        String utr = rawUtr.toUpperCase();
-        if (recharges.existsByUtr(utr)) {
-            throw ApiException.conflict("This transaction id was already submitted");
-        }
-        return utr;
-    }
-
-    private RechargeRequest saveApprovedRecharge(AppUser tenant, BigDecimal amount, String utr) {
-        RechargeRequest req = new RechargeRequest();
-        req.setTenant(tenant);
-        req.setLandlord(tenant.getLandlord());
-        req.setAmount(amount);
-        req.setUtr(utr);
-        req.setStatus(RechargeStatus.APPROVED);
-        req.setDecidedAt(Instant.now());
-        return recharges.save(req);
-    }
-
-    private Wallet creditTenantWallet(Long tenantId, BigDecimal amount, String utr) {
-        return walletService.apply(tenantId, TxnType.RECHARGE, amount, "Instant UPI " + utr);
-    }
-
-    private void restorePowerIfEligible(Long tenantId, Wallet updatedWallet) {
-        rooms.findByTenantId(tenantId).ifPresent(room -> {
-            Meter meter = room.getMeter();
-            boolean isPowerCut = !meter.isRelayOn();
-            boolean notManuallyLocked = !meter.isManualLock();
-            boolean balanceAboveMinimum = updatedWallet.getBalance().compareTo(updatedWallet.getMinBalance()) > 0;
-
-            if (isPowerCut && notManuallyLocked && balanceAboveMinimum) {
-                meterCommands.sendRelay(meter, true);
-            }
-        });
     }
 
     private RechargeResponse toDto(RechargeRequest r, AppUser t) {
