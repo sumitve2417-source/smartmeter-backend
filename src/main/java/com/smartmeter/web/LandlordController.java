@@ -14,7 +14,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -34,11 +33,6 @@ public class LandlordController {
     @PutMapping("/settings")
     public SettingsResponse updateSettings(Authentication a, @Valid @RequestBody SettingsRequest r) {
         return svc.updateSettings(a.getName(), r);
-    }
-
-    @PostMapping(value = "/settings/qr", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public SettingsResponse uploadQr(Authentication a, @RequestParam("file") MultipartFile file) {
-        return svc.uploadQr(a.getName(), file);
     }
 
     @GetMapping("/rooms")
@@ -70,7 +64,6 @@ public class LandlordController {
     public List<RechargeResponse> recharges(Authentication a, @RequestParam(defaultValue = "PENDING") RechargeStatus status) {
         return svc.listRecharges(a.getName(), status);
     }
-
 
     @GetMapping("/support")
     public SupportInfo support() { return support.forLandlord(); }
