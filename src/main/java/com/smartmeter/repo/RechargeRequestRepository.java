@@ -11,4 +11,7 @@ public interface RechargeRequestRepository extends JpaRepository<RechargeRequest
     List<RechargeRequest> findTop20ByTenantIdOrderByCreatedAtDesc(Long tenantId);
     Optional<RechargeRequest> findByIdAndLandlordId(Long id, Long landlordId);
     boolean existsByUtr(String utr);
+
+    // Added for Razorpay Order ID lookup
+    Optional<RechargeRequest> findByUtr(String utr);
 }
