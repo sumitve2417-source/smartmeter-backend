@@ -18,16 +18,10 @@ public class LandlordSettings {
     private AppUser landlord;
 
     @Column(length = 100)
-    private String upiId;
+    private String razorpayKeyId;
 
     @Column(length = 100)
-    private String payeeName;
-
-    @Column(columnDefinition = "MEDIUMBLOB")
-    private byte[] qrImage;
-
-    @Column(length = 30)
-    private String qrContentType;
+    private String razorpayKeySecret;
 
     /** Price per kWh. */
     @Column(nullable = false, precision = 8, scale = 2)
