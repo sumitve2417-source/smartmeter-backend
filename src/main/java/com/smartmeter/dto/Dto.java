@@ -14,13 +14,13 @@ public final class Dto {
     public record LoginResponse(String token, String role, String fullName, long expiresInSeconds) {}
 
     public record SettingsRequest(
-            @NotBlank @Pattern(regexp = "^[a-zA-Z0-9.\\-_]{2,64}@[a-zA-Z]{2,32}$", message = "invalid UPI ID") String upiId,
-            @NotBlank @Size(max = 100) String payeeName,
             @NotNull @DecimalMin("0.01") @Digits(integer = 4, fraction = 2) BigDecimal tariffPerKwh,
-            @NotNull @DecimalMin("0") @Digits(integer = 8, fraction = 2) BigDecimal minBalance) {}
+            @NotNull @DecimalMin("0") @Digits(integer = 8, fraction = 2) BigDecimal minBalance,
+            @NotBlank @Size(max = 100) String razorpayKeyId,
+            @NotBlank @Size(max = 100) String razorpayKeySecret) {}
 
-    public record SettingsResponse(String upiId, String payeeName, BigDecimal tariffPerKwh,
-                                   BigDecimal minBalance, String qrDataUrl) {}
+    public record SettingsResponse(BigDecimal tariffPerKwh, BigDecimal minBalance,
+                                   String razorpayKeyId, String razorpayKeySecret) {}
 
     public record RoomRequest(@NotBlank @Size(max = 50) String name,
                               @NotBlank @Pattern(regexp = "^[A-Za-z0-9_-]{3,40}$", message = "device id: 3-40 letters, digits, - or _") String deviceId) {}
@@ -40,10 +40,6 @@ public final class Dto {
     public record TenantResponse(Long id, String fullName, String username, String phone, boolean active, String room) {}
 
     public record RelayRequest(@NotNull Boolean on) {}
-
-    public record RechargeSubmit(
-            @NotNull @DecimalMin("1") @Digits(integer = 8, fraction = 2) BigDecimal amount,
-            @NotBlank @Pattern(regexp = "^[A-Za-z0-9]{8,30}$", message = "invalid UTR / transaction id") String utr) {}
 
     // ---- Payment Gateway Order DTOs ----
     public record PaymentOrderRequest(
@@ -65,7 +61,7 @@ public final class Dto {
                                   BigDecimal tariffPerKwh, boolean relayOn, boolean lowBalance,
                                   Double currentPowerW, Double currentVoltage, Instant lastSeen) {}
 
-    public record PaymentInfo(String upiId, String payeeName, String qrDataUrl, String upiLink) {}
+    public record PaymentInfo(String razorpayKeyId) {}
 
     public record TxnResponse(String type, BigDecimal amount, BigDecimal balanceAfter,
                               String reference, Instant createdAt) {}
@@ -105,3 +101,4 @@ public final class Dto {
     public record SupportInfo(String productMakerName, String productMakerEmail, String productMakerPhone,
                               String landlordName, String landlordEmail, String landlordPhone) {}
 }
+
