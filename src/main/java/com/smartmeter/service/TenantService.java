@@ -61,15 +61,36 @@ public class TenantService {
     }
 
     @Transactional
-    public RechargeResponse submitRecharge(String username, RechargeSubmit r) {
+    public com.smartmeter.dto.Dto.PaymentOrderResponse createPaymentOrder(String username, BigDecimal amount) {
         AppUser tenant = lookup.byUsername(username);
-        String utr = validateAndNormalizeUtr(r.utr());
+        Room room = rooms.findByTenantId(tenant.getId())
+                .orElseThrow(() -> ApiException.notFound("No room assigned"));
 
-        RechargeRequest rechargeRequest = saveApprovedRecharge(tenant, r.amount(), utr);
-        Wallet updatedWallet = creditTenantWallet(tenant.getId(), r.amount(), utr);
-        restorePowerIfEligible(tenant.getId(), updatedWallet);
+        try {
+            // Using Razorpay client (make sure your Key ID and Secret are configured in application.yml or environment variables)
+            com.razorpay.RazorpayClient razorpay = new com.razorpay.RazorpayClient("YOUR_KEY_ID", "YOUR_KEY_SECRET");
 
-        return toDto(rechargeRequest, tenant);
+            org.json.JSONObject orderRequest = new org.json.JSONObject();
+            orderRequest.put("amount", amount.multiply(new BigDecimal(100)).intValue()); // Amount in paise
+            orderRequest.put("currency", "INR");
+            orderRequest.put("receipt", "room_" + room.getId() + "_" + System.currentTimeMillis());
+
+            com.razorpay.Order order = razorpay.orders.create(orderRequest);
+            String orderId = order.get("id");
+
+            // Save a pending recharge record locked to this official gateway order ID
+            RechargeRequest req = new RechargeRequest();
+            req.setTenant(tenant);
+            req.setLandlord(tenant.getLandlord());
+            req.setAmount(amount);
+            req.setUtr(orderId);
+            req.setStatus(RechargeStatus.PENDING);
+            recharges.save(req);
+
+            return new com.smartmeter.dto.Dto.PaymentOrderResponse(orderId, amount, "YOUR_KEY_ID", room.getName());
+        } catch (Exception e) {
+            throw ApiException.bad("Could not initialize payment gateway order");
+        }
     }
 
     @Transactional(readOnly = true)
