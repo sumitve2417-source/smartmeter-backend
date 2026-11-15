@@ -32,10 +32,10 @@ public class TenantController {
     @GetMapping("/payment-info")
     public PaymentInfo paymentInfo(Authentication a) { return svc.paymentInfo(a.getName()); }
 
-    @PostMapping("/recharges")
+    @PostMapping("/create-payment-order")
     @ResponseStatus(HttpStatus.CREATED)
-    public RechargeResponse recharge(Authentication a, @Valid @RequestBody RechargeSubmit r) {
-        return svc.submitRecharge(a.getName(), r);
+    public PaymentOrderResponse createPaymentOrder(Authentication a, @Valid @RequestBody PaymentOrderRequest r) {
+        return svc.createPaymentOrder(a.getName(), r.amount());
     }
 
     @GetMapping("/recharges")
