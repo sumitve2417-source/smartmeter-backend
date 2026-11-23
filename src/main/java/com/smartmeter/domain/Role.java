@@ -1,2 +1,3 @@
 package com.smartmeter.domain;
-public enum Role { LANDLORD, TENANT }
+
+public enum Role { ADMIN, LANDLORD, TENANT }
