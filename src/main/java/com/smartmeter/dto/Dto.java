@@ -100,5 +100,22 @@ public final class Dto {
 
     public record SupportInfo(String productMakerName, String productMakerEmail, String productMakerPhone,
                               String landlordName, String landlordEmail, String landlordPhone) {}
+
+    // ---- admin: landlord management ----
+    public record CreateLandlordRequest(
+            @NotBlank @Size(max = 100) String fullName,
+            @NotBlank @Pattern(regexp = "^[0-9]{10}$", message = "phone must be 10 digits") String phone,
+            @NotBlank @Pattern(regexp = "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$", message = "username must be a valid email") String username,
+            @NotBlank @Size(min = 8, max = 72) String password) {}
+
+    public record SetLandlordActiveRequest(@NotNull Boolean active) {}
+
+    public record LandlordSummaryResponse(
+            Long id,
+            String fullName,
+            String username,
+            String phone,
+            boolean active,
+            int roomCount) {}
 }
 
